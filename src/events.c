@@ -6,5 +6,12 @@ void handleInput(State* state) {
         case SDL_QUIT:
             state->isActive = false;
             break;
+        case SDL_KEYDOWN:
+            switch(state->event.key.keysym.sym) {
+                case SDLK_ESCAPE:
+                    state->isActive = false;
+                    break;
+            }
+            break;
     }
 }

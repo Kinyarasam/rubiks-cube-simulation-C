@@ -7,7 +7,6 @@
 
 State* initializeState() {
     State* gameState = malloc(sizeof(State));
-
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
         fprintf(stderr, "SDL could not initialize! SDL_Error: %s\n", SDL_GetError());
         return NULL;
@@ -20,6 +19,8 @@ State* initializeState() {
         SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN
     );
     if (!window) {
+        free(gameState);
+        SDL_Quit();
         fprintf(stderr, "Window could not be created! SDL_Error: %s\n", SDL_GetError());
         return NULL;
     }
@@ -30,12 +31,21 @@ State* initializeState() {
 
     SDL_GLContext context = SDL_GL_CreateContext(window);
     if (!context) {
+        SDL_DestroyWindow(window);
+        free(gameState);
+        SDL_Quit();
         fprintf(stderr, "OpenGL context could not be created! SDL_Error: %s\n", SDL_GetError());
         return NULL;
     }
 
+    glViewport(0, 0, WIDTH, HEIGHT);
+
     glewExperimental = GL_TRUE;
     if (glewInit() != GLEW_OK) {
+        SDL_GL_DeleteContext(context);
+        SDL_DestroyWindow(window);
+        free(gameState);
+        SDL_Quit();
         fprintf(stderr, "Failed to initialize GLEW\n");
         return NULL;
     }
@@ -48,12 +58,21 @@ State* initializeState() {
     );
     if (!shaderProgram) {
         fprintf(stderr, "Failed to create shader program.\n");
+        SDL_GL_DeleteContext(context);
+        SDL_DestroyWindow(window);
+        free(gameState);
+        SDL_Quit();
         return NULL;
     }
 
     gameState->scene = malloc(sizeof(Scene));
     if (!gameState->scene) {
         fprintf(stderr, "Failed to allocate Scene\n");
+        glDeleteProgram(shaderProgram);
+        SDL_GL_DeleteContext(context);
+        SDL_DestroyWindow(window);
+        free(gameState);
+        SDL_Quit();
         return NULL;
     }
 
@@ -61,12 +80,28 @@ State* initializeState() {
     gameState->scene->context = context;
     gameState->scene->shaderProgram = shaderProgram;
 
+    gameState->cube = malloc(sizeof(Cube));
+    if (!gameState->cube) {
+        fprintf(stderr, "Failed to allocate Cube\n");
+        glDeleteProgram(shaderProgram);
+        SDL_GL_DeleteContext(context);
+        SDL_DestroyWindow(window);
+
+        free(gameState->scene);
+        free(gameState);
+        SDL_Quit();
+        return NULL;
+    }
+
     initCubelets(gameState);
 
     return gameState;
 }
 
 void cleanup(State* state) {
+    glDeleteVertexArrays(1, &state->VAO);
+    glDeleteBuffers(1, &state->VBO);
+    glDeleteBuffers(1, &state->faceIndexBuffer);
     glDeleteProgram(state->scene->shaderProgram);
 
     SDL_GL_DeleteContext(state->scene->context);
@@ -87,80 +122,89 @@ int main(int argc, char* argv[]) {
     state->isActive = true;
 
     // Vertex data with positions and colors (6 faces × 6 vertices × (3 position + 3 color))
-    float vertices[6*6*6] = {
-        // Front face (red)
-        -0.5f, -0.5f,  0.5f,  1.0f, 0.0f, 0.0f,
-         0.5f, -0.5f,  0.5f,  1.0f, 0.0f, 0.0f,
-         0.5f,  0.5f,  0.5f,  1.0f, 0.0f, 0.0f,
-         0.5f,  0.5f,  0.5f,  1.0f, 0.0f, 0.0f,
-        -0.5f,  0.5f,  0.5f,  1.0f, 0.0f, 0.0f,
-        -0.5f, -0.5f,  0.5f,  1.0f, 0.0f, 0.0f,
+    float positions[6*6*3] = {
+        // Front face
+        -0.5f, -0.5f,  0.5f,
+        0.5f, -0.5f,  0.5f,
+        0.5f,  0.5f,  0.5f,
+        0.5f,  0.5f,  0.5f,
+        -0.5f,  0.5f,  0.5f,
+        -0.5f, -0.5f,  0.5f,
         
-        // Back face (orange)
-        -0.5f, -0.5f, -0.5f,  1.0f, 0.5f, 0.0f,
-         0.5f, -0.5f, -0.5f,  1.0f, 0.5f, 0.0f,
-         0.5f,  0.5f, -0.5f,  1.0f, 0.5f, 0.0f,
-         0.5f,  0.5f, -0.5f,  1.0f, 0.5f, 0.0f,
-        -0.5f,  0.5f, -0.5f,  1.0f, 0.5f, 0.0f,
-        -0.5f, -0.5f, -0.5f,  1.0f, 0.5f, 0.0f,
+        // Back face
+        -0.5f, -0.5f, -0.5f,
+        0.5f, -0.5f, -0.5f,
+        0.5f,  0.5f, -0.5f,
+        0.5f,  0.5f, -0.5f,
+        -0.5f,  0.5f, -0.5f,
+        -0.5f, -0.5f, -0.5f,
         
-        // Left face (green)
-        -0.5f,  0.5f,  0.5f,  0.0f, 1.0f, 0.0f,
-        -0.5f,  0.5f, -0.5f,  0.0f, 1.0f, 0.0f,
-        -0.5f, -0.5f, -0.5f,  0.0f, 1.0f, 0.0f,
-        -0.5f, -0.5f, -0.5f,  0.0f, 1.0f, 0.0f,
-        -0.5f, -0.5f,  0.5f,  0.0f, 1.0f, 0.0f,
-        -0.5f,  0.5f,  0.5f,  0.0f, 1.0f, 0.0f,
+        // Left face
+        -0.5f,  0.5f,  0.5f,
+        -0.5f,  0.5f, -0.5f,
+        -0.5f, -0.5f, -0.5f,
+        -0.5f, -0.5f, -0.5f,
+        -0.5f, -0.5f,  0.5f,
+        -0.5f,  0.5f,  0.5f,
         
-        // Right face (blue)
-         0.5f,  0.5f,  0.5f,  0.0f, 0.0f, 1.0f,
-         0.5f,  0.5f, -0.5f,  0.0f, 0.0f, 1.0f,
-         0.5f, -0.5f, -0.5f,  0.0f, 0.0f, 1.0f,
-         0.5f, -0.5f, -0.5f,  0.0f, 0.0f, 1.0f,
-         0.5f, -0.5f,  0.5f,  0.0f, 0.0f, 1.0f,
-         0.5f,  0.5f,  0.5f,  0.0f, 0.0f, 1.0f,
+        // Right face
+        0.5f,  0.5f,  0.5f,
+        0.5f,  0.5f, -0.5f,
+        0.5f, -0.5f, -0.5f,
+        0.5f, -0.5f, -0.5f,
+        0.5f, -0.5f,  0.5f,
+        0.5f,  0.5f,  0.5f,
         
-        // Bottom face (white)
-        -0.5f, -0.5f, -0.5f,  1.0f, 1.0f, 1.0f,
-         0.5f, -0.5f, -0.5f,  1.0f, 1.0f, 1.0f,
-         0.5f, -0.5f,  0.5f,  1.0f, 1.0f, 1.0f,
-         0.5f, -0.5f,  0.5f,  1.0f, 1.0f, 1.0f,
-        -0.5f, -0.5f,  0.5f,  1.0f, 1.0f, 1.0f,
-        -0.5f, -0.5f, -0.5f,  1.0f, 1.0f, 1.0f,
+        // Bottom face
+        -0.5f, -0.5f, -0.5f,
+        0.5f, -0.5f, -0.5f,
+        0.5f, -0.5f,  0.5f,
+        0.5f, -0.5f,  0.5f,
+        -0.5f, -0.5f,  0.5f,
+        -0.5f, -0.5f, -0.5f,
         
-        // Top face (yellow)
-        -0.5f,  0.5f, -0.5f,  1.0f, 1.0f, 0.0f,
-         0.5f,  0.5f, -0.5f,  1.0f, 1.0f, 0.0f,
-         0.5f,  0.5f,  0.5f,  1.0f, 1.0f, 0.0f,
-         0.5f,  0.5f,  0.5f,  1.0f, 1.0f, 0.0f,
-        -0.5f,  0.5f,  0.5f,  1.0f, 1.0f, 0.0f,
-        -0.5f,  0.5f, -0.5f,  1.0f, 1.0f, 0.0f
+        // Top face
+        -0.5f,  0.5f, -0.5f,
+        0.5f,  0.5f, -0.5f,
+        0.5f,  0.5f,  0.5f,
+        0.5f,  0.5f,  0.5f,
+        -0.5f,  0.5f,  0.5f,
+        -0.5f,  0.5f, -0.5f
     };
 
-    GLuint VBO, VAO;
+    int faceIndices[36] = {
+        FACE_FRONT, FACE_FRONT, FACE_FRONT, FACE_FRONT, FACE_FRONT, FACE_FRONT,  // Front (Red)
+        FACE_BACK, FACE_BACK, FACE_BACK, FACE_BACK, FACE_BACK, FACE_BACK,  // Back (Orange)
+        FACE_LEFT, FACE_LEFT, FACE_LEFT, FACE_LEFT, FACE_LEFT, FACE_LEFT,  // Left (Green)
+        FACE_RIGHT, FACE_RIGHT, FACE_RIGHT, FACE_RIGHT, FACE_RIGHT, FACE_RIGHT,  // Right (Blue)
+        FACE_BOTTOM, FACE_BOTTOM, FACE_BOTTOM, FACE_BOTTOM, FACE_BOTTOM, FACE_BOTTOM,  // Bottom (White)
+        FACE_TOP, FACE_TOP, FACE_TOP, FACE_TOP, FACE_TOP, FACE_TOP   // Top (Yellow)
+    };
 
-    glGenVertexArrays(1, &VAO);
-    glGenBuffers(1, &VBO);
+    glGenVertexArrays(1, &state->VAO);
+    glGenBuffers(1, &state->VBO);
+    glGenBuffers(1, &state->faceIndexBuffer);
 
-    glBindVertexArray(VAO);
-    glBindBuffer(GL_ARRAY_BUFFER, VBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+    glBindVertexArray(state->VAO);
 
-    // Position attribute
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
+    glBindBuffer(GL_ARRAY_BUFFER, state->VBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(positions), positions, GL_STATIC_DRAW);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
 
-    // Color attribute
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(3 * sizeof(float)));
-    glEnableVertexAttribArray(1);
+    glBindBuffer(GL_ARRAY_BUFFER, state->faceIndexBuffer);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(faceIndices), faceIndices, GL_STATIC_DRAW);
+    glVertexAttribIPointer(2, 1, GL_INT, 0, (void*)0);
+    glEnableVertexAttribArray(2);
 
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
     glBindVertexArray(0);
 
     while (state->isActive) {
         while (SDL_PollEvent(&state->event)) {
             handleInput(state);
         }
+
+        updateCubelets(state);
 
         glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -178,11 +222,25 @@ int main(int argc, char* argv[]) {
         glUniformMatrix4fv(viewLoc, 1, GL_FALSE, (float*)view);
         glUniformMatrix4fv(projLoc, 1, GL_FALSE, (float*)projection);
 
-        glBindVertexArray(VAO);
+        glBindVertexArray(state->VAO);
         for (int i = 0; i < CUBELET_COUNT; i++) {
+            Cubelet* cubelet = &state->cube->cubelets[i];
+
             mat4 model;
             glm_mat4_identity(model);
-            glm_translate(model, state->cube->cubelets[i].position);
+
+            float angle = glm_vec3_norm(cubelet->rotating_angle);
+            if (angle > 0.0f) {
+                vec3 axis;
+                glm_vec3_copy(cubelet->rotating_angle, axis);
+                glm_vec3_normalize(axis); // You naughty lil angle, behave! 😤
+                glm_rotate(model, angle, axis); // YAS twist that body 😩
+            }
+
+            glm_translate(model, cubelet->position);
+
+            GLuint colorsLoc = glGetUniformLocation(state->scene->shaderProgram, "faceColors");
+            glUniform3fv(colorsLoc, 6, (float*)cubelet->face_colors);
 
             GLuint modelLoc = glGetUniformLocation(state->scene->shaderProgram, "model");
             glUniformMatrix4fv(modelLoc, 1, GL_FALSE, (float*)model);
